@@ -47,3 +47,5 @@ Luego visita `http://localhost:3000`.
 - 3 vidas con invencibilidad temporal al reaparecer (parpadeo)
 - Asteroides se parten en fragmentos más pequeños al ser destruidos
 - Partículas de explosión al destruir asteroides
+- Power-up **Disparo Triple**: al destruir un asteroide hay 20% de prob. de que aparezca cerca de la nave (una vez por ronda, garantizado al 4.º asteroide destruido). Al recogerlo, la nave dispara 3 balas en abanico durante 10 s
+- Nave blanca con 2 franjas rojas
