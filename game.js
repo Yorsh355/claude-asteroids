@@ -123,6 +123,58 @@ class Asteroid {
   }
 }
 
+// ── Power-up de escudo ────────────────────────────────────────────────────────
+const SHIELD_TIME = 5; // duración del escudo (s)
+const SHIELD_RADIUS = 26;
+
+class ShieldPickup {
+  constructor() {
+    // Aparece lejos de la nave
+    do {
+      this.x = rand(40, W - 40);
+      this.y = rand(60, H - 40);
+    } while (ship && dist(this, ship) < 150);
+    const angle = rand(0, Math.PI * 2);
+    this.vx = Math.cos(angle) * 20;
+    this.vy = Math.sin(angle) * 20;
+    this.radius = 10;
+    this.ttl = 15; // desaparece si no se recoge
+    this.dead = false;
+  }
+
+  update(dt) {
+    this.x = wrap(this.x + this.vx * dt, W);
+    this.y = wrap(this.y + this.vy * dt, H);
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  draw() {
+    // Parpadea cuando está por desaparecer
+    if (this.ttl < 3 && Math.floor(this.ttl * 6) % 2 === 0) return;
+    const t = performance.now() / 1000;
+    const r = this.radius + Math.sin(t * 8) * 1.5;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.shadowColor = "rgba(255, 170, 40, 0.9)";
+    ctx.shadowBlur = 12;
+    ctx.strokeStyle = "rgba(255, 215, 100, 0.95)";
+    ctx.fillStyle = "rgba(255, 200, 70, 0.25)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgb(255, 215, 100)";
+    ctx.font = "bold 12px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("S", 0, 1);
+    ctx.restore();
+  }
+}
+
 // ── Ship ──────────────────────────────────────────────────────────────────────
 class Ship {
   constructor() {
@@ -140,12 +192,14 @@ class Ship {
     this.thrusting = false;
     this.invincible = 3;
     this.shootCooldown = 0;
+    this.shield = 0; // segundos restantes de escudo
     this.dead = false;
   }
 
   update(dt) {
     if (this.dead) return;
     if (this.invincible > 0) this.invincible -= dt;
+    if (this.shield > 0) this.shield -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.tripleTimer > 0) this.tripleTimer -= dt;
 
@@ -183,8 +237,46 @@ class Ship {
     return [new Bullet(ox, oy, this.angle)];
   }
 
+  drawShield() {
+    // Parpadeo en el último segundo
+    if (this.shield < 1 && Math.floor(this.shield * 10) % 2 === 0) return;
+
+    const t = performance.now() / 1000;
+    const base = SHIELD_RADIUS + Math.sin(t * 40) * 1.5 + rand(-1, 1);
+    const N = 28;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    // Relleno suave tipo fuego
+    const g = ctx.createRadialGradient(0, 0, base * 0.5, 0, 0, base);
+    g.addColorStop(0, "rgba(255, 220, 90, 0)");
+    g.addColorStop(1, `rgba(255, 200, 70, ${rand(0.18, 0.3).toFixed(2)})`);
+    ctx.fillStyle = g;
+
+    // Contorno ondulante que vibra
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      const r = base + Math.sin(a * 5 + t * 18) * 1.8 + rand(-1.2, 1.2);
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255, 215, 100, ${rand(0.6, 0.9).toFixed(2)})`;
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = "rgba(255, 170, 40, 0.9)";
+    ctx.shadowBlur = 10;
+    ctx.stroke();
+    ctx.restore();
+  }
+
   draw() {
     if (this.dead) return;
+    if (this.shield > 0) this.drawShield();
     // Parpadeo durante invencibilidad de reaparición
     if (this.invincible > 0 && Math.floor(this.invincible * 8) % 2 === 0)
       return;
@@ -329,12 +421,18 @@ class PowerUp {
 }
 
 // ── Estado del juego ──────────────────────────────────────────────────────────
-let ship, bullets, asteroids, particles, powerUps;
+let ship, bullets, asteroids, particles, pickups, powerUps;
 let tripleSpawned; // el power-up aparece 1 vez por ronda
 let roundKills; // asteroides destruidos en la ronda actual
 let score, lives, level;
 let state; // 'playing' | 'dead' | 'gameover'
 let deadTimer;
+let pickupTimer; // cuenta atrás para el escudo de la ronda; <0 = ya apareció
+
+function resetPickups() {
+  pickups = [];
+  pickupTimer = rand(4, 12); // garantiza 1 escudo por ronda
+}
 
 function spawnAsteroids(count) {
   const SAFE_DIST = 130;
@@ -356,6 +454,7 @@ function initGame() {
   powerUps = [];
   tripleSpawned = false;
   roundKills = 0;
+  resetPickups();
   score = 0;
   lives = 3;
   level = 1;
@@ -370,6 +469,7 @@ function nextLevel() {
   powerUps = [];
   tripleSpawned = false;
   roundKills = 0;
+  resetPickups();
   ship.reset();
   spawnAsteroids(3 + level);
 }
@@ -470,11 +570,34 @@ function update(dt) {
   asteroids = asteroids.filter((a) => !a.dead).concat(newAsteroids);
   bullets = bullets.filter((b) => !b.dead);
 
+  // Power-up de escudo: aparece una vez por ronda
+  if (pickupTimer >= 0) {
+    pickupTimer -= dt;
+    if (pickupTimer < 0) pickups.push(new ShieldPickup());
+  }
+  pickups.forEach((p) => p.update(dt));
+  for (const p of pickups) {
+    if (dist(ship, p) < ship.radius + p.radius) {
+      p.dead = true;
+      ship.shield = SHIELD_TIME;
+    }
+  }
+  pickups = pickups.filter((p) => !p.dead);
+
   // Nave vs asteroide
   if (ship.invincible <= 0) {
+    const hitR = ship.shield > 0 ? SHIELD_RADIUS : ship.radius;
     for (const a of asteroids) {
-      if (dist(ship, a) < ship.radius + a.radius * 0.82) {
-        killShip();
+      if (dist(ship, a) < hitR + a.radius * 0.82) {
+        if (ship.shield > 0) {
+          // El escudo absorbe el golpe y destruye el asteroide (sin puntos)
+          ship.shield = 0;
+          a.dead = true;
+          explode(a.x, a.y, a.size * 5);
+          asteroids = asteroids.filter((x) => !x.dead).concat(a.split());
+        } else {
+          killShip();
+        }
         break;
       }
     }
@@ -549,6 +672,7 @@ function draw() {
   particles.forEach((p) => p.draw());
   asteroids.forEach((a) => a.draw());
   powerUps.forEach((p) => p.draw());
+  pickups.forEach((p) => p.draw());
   bullets.forEach((b) => b.draw());
   ship.draw();
 
